@@ -39,7 +39,7 @@ if file_caution and file_master:
                 # Cell Format (Calibri, Size 9, Wrapped, V-Center, Border)
                 label_format = workbook.book.add_format({
                     'font_name': 'Calibri',
-                    'font_size': 9,
+                    'font_size': 10,
                     'text_wrap': True,
                     'valign': 'vcenter',
                     'border': 1,
@@ -103,3 +103,4 @@ if file_caution and file_master:
                 st.error("No matches found.")
     except Exception as e:
         st.error(f"Error: {e}")
+
