@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
 from fpdf import FPDF
-import io
 
 def generate_pdf(df):
-    # A4 dimensions in mm: 210 x 297
+    # Use 'UTF-8' friendly settings
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
@@ -13,15 +12,11 @@ def generate_pdf(df):
     label_w = 100
     label_h = 43
     
-    # Margins from your requirement
-    top_margin = 10    # 1 cm
-    right_margin = 7   # 0.7 cm
-    # We calculate left margin to balance the 0.7cm right margin on A4 (210mm)
-    # (210 - (100*2) - 7) = 3mm left margin
-    left_margin = 3 
+    # Margins: Top 1cm, Right 0.7cm
+    top_margin = 10    
+    left_margin = 3 # (210mm - 200mm - 7mm right margin = 3mm left)
     
     for i, row in df.iterrows():
-        # 12 labels per page (2x6)
         col = i % 2
         line = (i // 2) % 6
         
@@ -38,6 +33,21 @@ def generate_pdf(df):
         # Text Offsets
         pdf.set_xy(x + 5, y + 5)
         
+        # --- CLEANING DATA (Crucial to avoid Unicode Errors) ---
+        def clean_text(text):
+            if pd.isna(text): return ""
+            # Replace common problematic characters
+            return str(text).encode('ascii', 'ignore').decode('ascii')
+
+        father = clean_text(row['FATHER'])
+        name = clean_text(row['NAME'])
+        address = clean_text(row['ADDRESS'])
+        roll = clean_text(row['ROLL NUMBER'])
+        
+        ph_parent = clean_text(row['PARENT PHONE'])
+        ph_student = clean_text(row['STUDENT PHONE'])
+        contact = f"{ph_student}/{ph_parent}".strip("/")
+        
         # From Header (Bold)
         pdf.set_font("Arial", 'B', 9)
         pdf.cell(0, 5, "From: Presidency College Bangalore (AUTONOMOUS)", ln=True)
@@ -46,45 +56,34 @@ def generate_pdf(df):
         pdf.set_font("Arial", '', 9)
         pdf.set_x(x + 5)
         
-        # Join phone numbers logic
-        ph_parent = str(row['PARENT PHONE']) if pd.notna(row['PARENT PHONE']) else ""
-        ph_student = str(row['STUDENT PHONE']) if pd.notna(row['STUDENT PHONE']) else ""
-        contact = f"{ph_student}/{ph_parent}".strip("/")
-        
         label_text = (
-            f"To, Shri/Smt. {row['FATHER']}\n"
-            f"c/o: {row['NAME']}\n"
-            f"Address: {row['ADDRESS']}\n"
-            f"Contact: {contact}   ID: {row['ROLL NUMBER']}"
+            f"To, Shri/Smt. {father}\n"
+            f"c/o: {name}\n"
+            f"Address: {address}\n"
+            f"Contact: {contact}   ID: {roll}"
         )
         pdf.multi_cell(label_w - 10, 5, label_text)
         
-    return pdf.output(dest='S').encode('latin-1')
+    # Return output as bytes directly
+    return pdf.output(dest='S')
 
-st.title("Precise Label Generator (2x6)")
-
-file_caution = st.file_uploader("Upload Caution Letter File", type=['xlsx', 'csv'])
-file_master = st.file_uploader("Upload Student Master Data", type=['xlsx', 'csv'])
+# ... (rest of your file upload logic) ...
 
 if file_caution and file_master:
-    # Load Data
-    df_c = pd.read_csv(file_caution) if file_caution.name.endswith('csv') else pd.read_excel(file_caution)
-    df_m = pd.read_csv(file_master) if file_master.name.endswith('csv') else pd.read_excel(file_master)
-    
-    # Standardize Column Names for matching
-    # Caution Letter: Roll No is Col B (Index 1), Name is Col C (Index 2)
-    # Master Data: ROLL NUMBER is Col B, NAME is Col F
-    
-    # Filter Master data based on Caution Letter Roll Numbers
-    caution_rolls = df_c.iloc[:, 1].dropna().astype(str).unique()
-    
-    # Exact Match Logic
-    df_final = df_m[df_m['ROLL NUMBER'].astype(str).isin(caution_rolls)]
+    # ... (loading data) ...
     
     if st.button("Generate 12-Label PDF"):
         if not df_final.empty:
-            pdf_bytes = generate_pdf(df_final)
-            st.download_button("Download PDF", pdf_bytes, "Labels.pdf", "application/pdf")
-            st.success(f"Matched {len(df_final)} students from Caution List.")
-        else:
-            st.error("No matching Roll Numbers found between files.")
+            try:
+                pdf_output = generate_pdf(df_final)
+                # Note: fpdf's output('S') returns bytes in newer versions
+                # or a string we can convert. This is the safest way:
+                st.download_button(
+                    label="Download PDF",
+                    data=bytes(pdf_output),
+                    file_name="Labels.pdf",
+                    mime="application/pdf"
+                )
+                st.success(f"Matched {len(df_final)} students.")
+            except Exception as e:
+                st.error(f"Error generating PDF: {e}")
