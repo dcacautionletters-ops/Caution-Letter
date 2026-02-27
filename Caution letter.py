@@ -2,106 +2,108 @@ import streamlit as st
 import pandas as pd
 from fpdf import FPDF
 
+# --- PDF GENERATION LOGIC ---
 def generate_pdf(df):
-    # Initialize A4 PDF
+    # Standard A4: 210 x 297 mm
     pdf = FPDF(orientation='P', unit='mm', format='A4')
-    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.set_auto_page_break(auto=False) # Manual control for precision
     pdf.add_page()
     
-    # EXACT DIMENSIONS (mm)
-    label_w = 100  # 10 cm
-    label_h = 43   # 4.3 cm
+    # STRICT DIMENSIONS (mm)
+    label_w = 100   # 10 cm
+    label_h = 43    # 4.3 cm
     
-    # LAYOUT SPACING (mm)
+    # STRICT MARGINS (mm)
     top_margin = 10    # 1 cm from top
-    right_margin = 7   # 0.7 cm from right
-    # (210mm A4 width - 200mm labels width - 7mm right margin) = 3mm left
-    left_margin = 3    
+    left_margin = 7    # 0.7 cm from left
     
     for i, (_, row) in enumerate(df.iterrows()):
+        # Calculate grid coordinates
         col = i % 2
-        line = (i // 2) % 6  # 6 rows per page
+        line = (i // 2) % 6
         
+        # Add new page every 12 labels
         if i > 0 and i % 12 == 0:
             pdf.add_page()
             
         x = left_margin + (col * label_w)
         y = top_margin + (line * label_h)
         
-        # Draw Light Grey Border
+        # 1. Draw the Label Box (Light Grey)
         pdf.set_draw_color(220, 220, 220)
         pdf.rect(x, y, label_w, label_h)
         
-        # Position cursor inside the label
-        pdf.set_xy(x + 5, y + 5)
+        # 2. Text Content (Ensuring it stays INSIDE the box)
+        # Margin inside the box = 4mm
+        text_x = x + 4
+        text_y = y + 5
+        pdf.set_xy(text_x, text_y)
         
-        # Function to strip characters that crash PDF engines
+        # Helper to clean text
         def clean(val):
             if pd.isna(val): return ""
             return str(val).encode('ascii', 'ignore').decode('ascii')
 
-        # Data Mapping based on your files
+        # Data mapping
         father = clean(row.get('FATHER', ''))
-        student = clean(row.get('NAME', ''))
+        student_name = clean(row.get('NAME', ''))
         address = clean(row.get('ADDRESS', ''))
         roll = clean(row.get('ROLL NUMBER', ''))
-        ph1 = clean(row.get('STUDENT PHONE', ''))
-        ph2 = clean(row.get('PARENT PHONE', ''))
-        contact = f"{ph1}/{ph2}".strip("/")
+        ph_s = clean(row.get('STUDENT PHONE', ''))
+        ph_p = clean(row.get('PARENT PHONE', ''))
+        contact = f"{ph_s}/{ph_p}".strip("/")
         
-        # --- PRINT CONTENT ---
-        # Header
-        pdf.set_font("Arial", 'B', 9)
+        # Header (Bold)
+        pdf.set_font("Arial", 'B', 8.5) # Slightly smaller font to ensure fit
         pdf.cell(0, 5, "From: Presidency College Bangalore (AUTONOMOUS)", ln=True)
         
-        # Address Details
-        pdf.set_font("Arial", '', 9)
-        pdf.set_x(x + 5)
+        # Body (Regular)
+        pdf.set_font("Arial", '', 8.5)
+        pdf.set_x(text_x)
         
-        label_body = (
+        label_text = (
             f"To, Shri/Smt. {father}\n"
-            f"c/o: {student}\n"
+            f"c/o: {student_name}\n"
             f"Address: {address}\n"
             f"Contact: {contact}   ID: {roll}"
         )
-        pdf.multi_cell(label_w - 10, 5, label_body)
+        # multi_cell width set to label_w - 8 to keep it away from the borders
+        pdf.multi_cell(label_w - 8, 4.5, label_text)
         
-    # Handle both fpdf and fpdf2 output types to prevent encoding errors
+    # Generate Output
     pdf_out = pdf.output(dest='S')
     if isinstance(pdf_out, str):
         return pdf_out.encode('latin-1')
     return pdf_out
 
-# --- STREAMLIT INTERFACE ---
-st.title("🏷️ 2x6 Professional Label Generator")
+# --- UI LOGIC ---
+st.title("Precise Address Label Generator")
 
-file_c = st.file_uploader("Upload Caution Letter File (Col B must be Roll No)", type=['xlsx', 'csv'])
-file_m = st.file_uploader("Upload Master Database (Must have 'ROLL NUMBER' column)", type=['xlsx', 'csv'])
+c_file = st.file_uploader("Upload Caution Letter File", type=['xlsx', 'csv'])
+m_file = st.file_uploader("Upload Master Database", type=['xlsx', 'csv'])
 
-if file_c and file_m:
+if c_file and m_file:
     try:
-        # Load data
-        df_c = pd.read_csv(file_c) if file_c.name.endswith('csv') else pd.read_excel(file_c)
-        df_m = pd.read_csv(file_m) if file_m.name.endswith('csv') else pd.read_excel(file_m)
+        df_c = pd.read_csv(c_file) if c_file.name.endswith('csv') else pd.read_excel(c_file)
+        df_m = pd.read_csv(m_file) if m_file.name.endswith('csv') else pd.read_excel(m_file)
 
-        # Matching Logic
+        # Match by Roll Number (Column B in Caution, ROLL NUMBER in Master)
         caution_rolls = df_c.iloc[:, 1].dropna().astype(str).str.strip().unique()
         df_m['ROLL NUMBER'] = df_m['ROLL NUMBER'].astype(str).str.strip()
         
         df_final = df_m[df_m['ROLL NUMBER'].isin(caution_rolls)]
 
-        if st.button("Generate 12 Labels Per Sheet"):
+        if st.button("Generate 12-Label PDF"):
             if not df_final.empty:
                 pdf_bytes = generate_pdf(df_final)
                 st.download_button(
-                    label="📥 Download PDF",
+                    label="📥 Download Labels PDF",
                     data=pdf_bytes,
-                    file_name="Student_Address_Labels.pdf",
+                    file_name="Student_Labels_A4.pdf",
                     mime="application/pdf"
                 )
-                st.success(f"Labels generated for {len(df_final)} students.")
+                st.success(f"Generated labels for {len(df_final)} students.")
             else:
-                st.error("No matches found. Ensure 'ROLL NUMBER' column exists in Master file.")
-                
+                st.error("No matches found between the files.")
     except Exception as e:
         st.error(f"Error: {e}")
