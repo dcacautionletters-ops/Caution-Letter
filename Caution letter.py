@@ -6,7 +6,6 @@ import io
 def clean_val(val):
     if pd.isna(val) or str(val).strip().lower() == 'nan': 
         return ""
-    # Remove .0 if it's a number stored as a float
     text = str(val).replace('.0', '').strip()
     return text
 
@@ -21,22 +20,22 @@ def get_sort_rank(roll):
     return 6 
 
 st.set_page_config(page_title="Student Label Generator", layout="wide")
-st.title("🏷️ Student Label Generator (Updated Matching)")
+st.title("🏷️ Student Label Generator (Rectified)")
 
-# --- SIDEBAR SETTINGS ---
+# --- SIDEBAR ---
 st.sidebar.header("Global Settings")
 from_address = st.sidebar.text_area(
     "Edit 'From' Address:", 
     value="Presidency College Bangalore (AUTONOMOUS)\nKempapura, Hebbal, Bengaluru - 560024"
 )
 
-# --- FILE UPLOAD SECTION ---
+# --- FILE UPLOAD ---
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. Shortage Report")
     file_shortage = st.file_uploader("Upload Shortage File", type=['xlsx', 'csv'], key="shortage")
-    skip_rows = st.number_input("Shortage data starts on row:", min_value=1, value=4)
+    skip_rows = st.number_input("Shortage data starts on row (usually 4):", min_value=1, value=4)
 
 with col2:
     st.subheader("2. Master Database")
@@ -44,50 +43,43 @@ with col2:
 
 if file_shortage and file_master:
     try:
-        # 1. Load Shortage File (B, C, G)
+        # 1. Load Shortage File
         if file_shortage.name.endswith('csv'):
             df_s = pd.read_csv(file_shortage, skiprows=skip_rows-1)
         else:
             df_s = pd.read_excel(file_shortage, skiprows=skip_rows-1)
         
-        # Clean Shortage keys for matching (B=1, C=2, G=6)
-        shortage_keys = df_s.iloc[:, [1, 2, 6]].dropna(subset=[df_s.columns[1]]).copy()
-        shortage_keys.columns = ['Match_B', 'Match_C', 'Match_G']
-        for col in shortage_keys.columns:
-            shortage_keys[col] = shortage_keys[col].astype(str).str.replace('.0', '', regex=False).str.strip().str.upper()
+        # Extract unique Roll Numbers from Shortage Column B (Index 1)
+        shortage_rolls = df_s.iloc[:, 1].dropna().astype(str).str.replace('.0', '', regex=False).str.strip().str.upper().unique()
         
-        # 2. Load Master File (B, F, J, AE, T, AU, AT)
+        # 2. Load Master File
         if file_master.name.endswith('csv'):
             df_m = pd.read_csv(file_master)
         else:
             df_m = pd.read_excel(file_master)
 
-        # Mapping: B=1, F=5, J=9, AE=30, T=19, AU=46, AT=45
-        # We grab the necessary columns from Master
-        mast_subset = df_m.iloc[:, [1, 5, 9, 30, 19, 46, 45]].copy()
-        mast_subset.columns = ['Roll_No', 'Name', 'Sec_J', 'Father', 'Address', 'Phone_AU', 'Phone_AT']
+        # Mapping Master Columns (Indices): 
+        # B=1, F=5, J=9, AE=30, T=19, AU=46, AT=45
+        mast_data = df_m.iloc[:, [1, 5, 30, 19, 46, 45]].copy()
+        mast_data.columns = ['Roll_No', 'Name', 'Father', 'Address', 'Phone_AU', 'Phone_AT']
         
-        # Clean Master keys for matching
-        mast_subset['Match_B'] = mast_subset['Roll_No'].astype(str).str.replace('.0', '', regex=False).str.strip().str.upper()
-        mast_subset['Match_C'] = mast_subset['Name'].astype(str).str.strip().str.upper()
-        mast_subset['Match_G'] = mast_subset['Sec_J'].astype(str).str.strip().str.upper()
+        # Clean Master Roll Nos for matching
+        mast_data['Match_ID'] = mast_data['Roll_No'].astype(str).str.replace('.0', '', regex=False).str.strip().str.upper()
 
-        # 3. Perform Matching (Inner Join)
-        df_matched = pd.merge(
-            mast_subset, 
-            shortage_keys, 
-            on=['Match_B', 'Match_C', 'Match_G'], 
-            how='inner'
-        )
+        # 3. Filter Master Data: Get students whose IDs are in the Shortage Report
+        df_matched = mast_data[mast_data['Match_ID'].isin(shortage_rolls)].copy()
 
-        # 4. Remove Duplicates (Ensure 1 label per student)
-        df_matched = df_matched.drop_duplicates(subset=['Roll_No']).copy()
+        # 4. Remove Duplicates: 1 Label per Roll Number
+        df_matched = df_matched.drop_duplicates(subset=['Match_ID'])
+
+        # Display Summary for Transparency
+        st.write(f"📊 **Summary:** Found {len(shortage_rolls)} unique students in Shortage Report. Matched {len(df_matched)} students in Master Database.")
 
         if st.button("Generate Sorted A4 Label Sheet"):
             if not df_matched.empty:
                 # --- SORTING ---
-                df_matched['sort_rank'] = df_matched['Roll_No'].apply(get_sort_rank)
-                df_matched = df_matched.sort_values(by=['sort_rank', 'Roll_No'])
+                df_matched['sort_rank'] = df_matched['Match_ID'].apply(get_sort_rank)
+                df_matched = df_matched.sort_values(by=['sort_rank', 'Match_ID'])
 
                 # Create Excel Workbook
                 output = io.BytesIO()
@@ -114,12 +106,11 @@ if file_shortage and file_master:
                 num_records = len(data_list)
                 
                 for i in range(0, num_records, 2):
-                    ws.set_row(r_num, 122) # Height
+                    ws.set_row(r_num, 122) # Label Height
 
                     # --- Left Label (Col A) ---
                     d = data_list[i]
-                    p1 = clean_val(d.get('Phone_AU'))
-                    p2 = clean_val(d.get('Phone_AT'))
+                    p1, p2 = clean_val(d.get('Phone_AU')), clean_val(d.get('Phone_AT'))
                     contact = f"{p1} / {p2}".strip(" / ")
                     
                     txt_left = (f"From: {from_address}\n"
@@ -132,8 +123,7 @@ if file_shortage and file_master:
                     # --- Right Label (Col C) ---
                     if i + 1 < num_records:
                         dr = data_list[i+1]
-                        pr1 = clean_val(dr.get('Phone_AU'))
-                        pr2 = clean_val(dr.get('Phone_AT'))
+                        pr1, pr2 = clean_val(dr.get('Phone_AU')), clean_val(dr.get('Phone_AT'))
                         contact_r = f"{pr1} / {pr2}".strip(" / ")
                         
                         txt_right = (f"From: {from_address}\n"
@@ -155,17 +145,17 @@ if file_shortage and file_master:
 
                 workbook_writer.close()
                 
-                st.success(f"Generated {len(df_matched)} unique labels.")
+                st.success(f"Successfully generated {len(df_matched)} unique labels.")
                 st.download_button(
-                    label="📥 Download Unique Label Sheet",
+                    label="📥 Download Rectified Label Sheet",
                     data=output.getvalue(),
-                    file_name="Student_Unique_Labels.xlsx",
+                    file_name="Student_Labels_Rectified.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             else:
-                st.error("No matches found between Shortage Report and Master Data using (B, C, G) vs (B, F, J).")
+                st.error("No students from the Shortage Report were found in the Master Database. Check the Roll Numbers.")
                 
     except Exception as e:
-        st.error(f"Error processing files: {e}")
+        st.error(f"Error: {e}")
 else:
-    st.info("Please upload both files to continue.")
+    st.info("Upload both files to start.")
