@@ -6,11 +6,9 @@ import io
 def clean_val(val):
     if pd.isna(val) or str(val).strip().lower() == 'nan': 
         return ""
-    # Remove .0 if it's a number stored as a float/decimal
-    text = str(val).replace('.0', '').strip()
-    return text
+    return str(val).replace('.0', '').strip()
 
-# --- Custom Sorting Function for your specific Series ---
+# --- Custom Sorting Function ---
 def get_sort_rank(roll):
     roll = str(roll).upper()
     if roll.startswith('25CG'): return 1
@@ -18,10 +16,10 @@ def get_sort_rank(roll):
     if roll.startswith('25CDS'): return 3
     if roll.startswith('24C'): return 4
     if roll.startswith('23C'): return 5
-    return 6 # Everything else
+    return 6
 
 st.set_page_config(page_title="Student Label Generator", layout="wide")
-st.title("🏷️ Student Label Generator (Final Version)")
+st.title("🏷️ Student Label Generator (Precision A4 Version)")
 
 # --- SIDEBAR SETTINGS ---
 st.sidebar.header("Global Settings")
@@ -29,11 +27,9 @@ from_address = st.sidebar.text_area(
     "Edit 'From' Address:", 
     value="Presidency College Bangalore (AUTONOMOUS)\nKempapura, Hebbal, Bengaluru - 560024"
 )
-st.sidebar.info("The labels will be sorted: 25CG > 25CAI > 25CDS > 24 > 23")
 
 # --- FILE UPLOAD SECTION ---
 col1, col2 = st.columns(2)
-
 with col1:
     st.subheader("1. Attendance Report")
     file_caution = st.file_uploader("Upload Attendance/Shortage File", type=['xlsx', 'csv'], key="caution")
@@ -45,119 +41,88 @@ with col2:
 
 if file_caution and file_master:
     try:
-        # Load Attendance File (Reads Col B, C, G)
-        if file_caution.name.endswith('csv'):
-            df_c = pd.read_csv(file_caution, skiprows=skip_rows-1)
-        else:
-            df_c = pd.read_excel(file_caution, skiprows=skip_rows-1)
-            
-        # Load Master File (Reads Col B, F, AD, S, AT, AS)
-        if file_master.name.endswith('csv'):
-            df_m = pd.read_csv(file_master)
-        else:
-            df_m = pd.read_excel(file_master)
+        # Load Files
+        df_c = pd.read_csv(file_caution, skiprows=skip_rows-1) if file_caution.name.endswith('csv') else pd.read_excel(file_caution, skiprows=skip_rows-1)
+        df_m = pd.read_csv(file_master) if file_master.name.endswith('csv') else pd.read_excel(file_master)
 
-        # 1. Match Roll No from Attendance (Column B - Index 1)
-        # We clean and get unique rolls so 1 student = 1 label
+        # Match and Filter
         caution_rolls = df_c.iloc[:, 1].dropna().astype(str).str.replace('.0', '', regex=False).str.strip().unique()
-        
-        # 2. Extract Data from Master based on Roll No (Column B - Index 1)
-        # B=1, F=5 (Name), AD=29 (Father), S=18 (Address), AT=45 (Father Ph), AS=44 (Student Ph)
-        # We use iloc to ensure we hit the right columns regardless of header names
         mast_data = df_m.iloc[:, [1, 5, 29, 18, 45, 44]].copy()
         mast_data.columns = ['Roll_No', 'Name', 'Father', 'Address', 'Father_Phone', 'Student_Phone']
-        
-        # Clean Roll numbers for the merge
         mast_data['Roll_No'] = mast_data['Roll_No'].astype(str).str.replace('.0', '', regex=False).str.strip()
-        
-        # Filter master data to only include students in the caution list
         df_matched = mast_data[mast_data['Roll_No'].isin(caution_rolls)].copy()
 
-        if st.button("Generate Sorted A4 Label Sheet"):
+        if st.button("Generate Precision A4 Labels"):
             if not df_matched.empty:
-                
-                # --- SORTING LOGIC ---
                 df_matched['sort_rank'] = df_matched['Roll_No'].apply(get_sort_rank)
                 df_matched = df_matched.sort_values(by=['sort_rank', 'Roll_No'])
 
-                # Create Excel Workbook
                 output = io.BytesIO()
-                workbook_writer = pd.ExcelWriter(output, engine='xlsxwriter')
-                ws = workbook_writer.book.add_worksheet('PRINT_LABELS')
+                workbook = pd.ExcelWriter(output, engine='xlsxwriter')
+                ws = workbook.book.add_worksheet('PRINT_LABELS')
 
-                # --- 3. FORMATTING (A4 Alignment) ---
+                # --- 1. COLUMN WIDTHS (100mm = ~46.5 in Excel width units) ---
                 ws.set_column('A:A', 46.5)
-                ws.set_column('B:B', 2.5) # The gap column
+                ws.set_column('B:B', 2.0)  # Tiny horizontal buffer if needed
                 ws.set_column('C:C', 46.5)
 
-                label_format = workbook_writer.book.add_format({
+                label_format = workbook.book.add_format({
                     'font_name': 'Calibri',
                     'font_size': 10,
                     'text_wrap': True,
                     'valign': 'vcenter',
+                    'align': 'left',
                     'border': 1,
-                    'border_color': '#C8C8C8' 
+                    'border_color': '#D3D3D3' 
                 })
 
-                # --- 4. LOOP THROUGH DATA (2 per row) ---
+                # --- 2. THE LOOP (Handling 3mm vertical gaps) ---
                 r_num = 0 
                 data_list = df_matched.to_dict('records')
-                num_records = len(data_list)
                 
-                for i in range(0, num_records, 2):
-                    ws.set_row(r_num, 122) # Height of label
+                for i in range(0, len(data_list), 2):
+                    # Set height for the label row (44mm = 124.7 points)
+                    ws.set_row(r_num, 124.7)
 
-                    # --- Left Label (Col A) ---
+                    # Left Label
                     d = data_list[i]
-                    f_ph = clean_val(d.get('Father_Phone'))
-                    s_ph = clean_val(d.get('Student_Phone'))
-                    contact = f"{f_ph} / {s_ph}".strip(" / ")
-                    
-                    txt_left = (f"From: {from_address}\n"
-                                f"To, Shri/Smt. {clean_val(d.get('Father'))}\n"
-                                f"c/o: {clean_val(d.get('Name'))}\n"
-                                f"Address: {clean_val(d.get('Address'))}\n"
-                                f"Contact: {contact}   ID: {clean_val(d.get('Roll_No'))}")
-                    ws.write(r_num, 0, txt_left, label_format)
+                    contact = f"{clean_val(d.get('Father_Phone'))} / {clean_val(d.get('Student_Phone'))}".strip(" / ")
+                    txt_l = (f"From: {from_address}\n"
+                             f"To, Shri/Smt. {clean_val(d.get('Father'))}\n"
+                             f"c/o: {clean_val(d.get('Name'))}\n"
+                             f"Address: {clean_val(d.get('Address'))}\n"
+                             f"Contact: {contact}   ID: {clean_val(d.get('Roll_No'))}")
+                    ws.write(r_num, 0, txt_l, label_format)
 
-                    # --- Right Label (Col C) ---
-                    if i + 1 < num_records:
+                    # Right Label
+                    if i + 1 < len(data_list):
                         dr = data_list[i+1]
-                        f_ph_r = clean_val(dr.get('Father_Phone'))
-                        s_ph_r = clean_val(dr.get('Student_Phone'))
-                        contact_r = f"{f_ph_r} / {s_ph_r}".strip(" / ")
-                        
-                        txt_right = (f"From: {from_address}\n"
-                                     f"To, Shri/Smt. {clean_val(dr.get('Father'))}\n"
-                                     f"c/o: {clean_val(dr.get('Name'))}\n"
-                                     f"Address: {clean_val(dr.get('Address'))}\n"
-                                     f"Contact: {contact_r}   ID: {clean_val(dr.get('Roll_No'))}")
-                        ws.write(r_num, 2, txt_right, label_format)
+                        contact_r = f"{clean_val(dr.get('Father_Phone'))} / {clean_val(dr.get('Student_Phone'))}".strip(" / ")
+                        txt_r = (f"From: {from_address}\n"
+                                 f"To, Shri/Smt. {clean_val(dr.get('Father'))}\n"
+                                 f"c/o: {clean_val(dr.get('Name'))}\n"
+                                 f"Address: {clean_val(dr.get('Address'))}\n"
+                                 f"Contact: {contact_r}   ID: {clean_val(dr.get('Roll_No'))}")
+                        ws.write(r_num, 2, txt_r, label_format)
 
-                    # --- Vertical Gap Row ---
                     r_num += 1
-                    ws.set_row(r_num, 8)
+                    
+                    # --- ADD 3MM GAP ROW ---
+                    # Only add gap if we aren't at the very last row of the page
+                    # 3mm = ~8.5 points
+                    ws.set_row(r_num, 8.5)
                     r_num += 1
 
-                # --- 5. PAGE SETUP (A4 FIX) ---
-                ws.set_paper(9) # Force A4
-                ws.set_margins(left=0.2, right=0.2, top=0.3, bottom=0.3)
-                ws.set_print_scale(100) # Force 100% (No shrinking)
+                # --- 3. PAGE SETUP (The Alignment "Anchor") ---
+                ws.set_paper(9)  # Force A4
+                # Top margin = 1.0cm (0.39 inches), Left/Right = 0.5cm (0.2 inches)
+                ws.set_margins(left=0.2, right=0.2, top=0.39, bottom=0.2)
+                ws.set_print_scale(100) # CRITICAL: Prevents Excel from shrinking the page
                 ws.center_horizontally()
 
-                workbook_writer.close()
-                
-                st.success(f"Generated {num_records} labels sorted by Roll No series.")
-                st.download_button(
-                    label="📥 Download Sorted Label Sheet",
-                    data=output.getvalue(),
-                    file_name="Student_Sorted_Labels.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            else:
-                st.error("No matches found between Attendance and Master Database.")
-                
+                workbook.close()
+                st.success("Labels Generated!")
+                st.download_button("📥 Download Labels", output.getvalue(), "NovaJet_12_Labels.xlsx")
+
     except Exception as e:
         st.error(f"Error: {e}")
-else:
-    st.info("Upload both files to start.")
