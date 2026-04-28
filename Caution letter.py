@@ -102,9 +102,23 @@ if file_caution and file_master:
                         
                         curr_rec += 1
 
+            # --- ENCODING ERROR FIX ---
             pdf_output = pdf.output()
+            
+            # If the output is a string (older FPDF), encode it.
+            # If it is a bytearray (newer FPDF), bytes() conversion works without error.
+            if isinstance(pdf_output, str):
+                final_pdf = pdf_output.encode('latin-1')
+            else:
+                final_pdf = bytes(pdf_output)
+
             st.success(f"Created {len(records)} labels.")
-            st.download_button("📥 Download PDF for Printing", data=bytes(pdf_output), file_name="Labels_Final.pdf", mime="application/pdf")
+            st.download_button(
+                label="📥 Download PDF for Printing", 
+                data=final_pdf, 
+                file_name="Labels_Final.pdf", 
+                mime="application/pdf"
+            )
 
     except Exception as e:
         st.error(f"Error: {e}")
