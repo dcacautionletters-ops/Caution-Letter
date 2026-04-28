@@ -3,12 +3,12 @@ import pandas as pd
 from fpdf import FPDF
 import io
 
-# --- 1. Helper Functions ---
+# --- 1. Data Cleaning Functions ---
 def clean_val(val):
     if pd.isna(val) or str(val).strip().lower() == 'nan': 
         return ""
-    # Clean float artifacts like '99.0' -> '99'
-    return str(val).replace('.0', '').strip()
+    # Remove decimal points from IDs or Phone numbers if present
+    return str(val).split('.')[0].strip()
 
 def get_sort_rank(roll):
     roll = str(roll).upper()
@@ -19,23 +19,14 @@ def get_sort_rank(roll):
     if roll.startswith('23C'): return 5
     return 6
 
-# --- 2. Custom PDF Class ---
-class LabelPDF(FPDF):
-    def __init__(self):
-        # We use 'mm' units for physical precision
-        super().__init__(orientation='P', unit='mm', format='A4')
-        self.set_auto_page_break(auto=False)
-        self.set_margins(0, 0, 0)
+# --- 2. Main Streamlit App ---
+st.set_page_config(page_title="NovaJet PDF Labeler", layout="wide")
+st.title("🏷️ Precision Label Generator (PDF Mode)")
 
-# --- 3. Streamlit Interface ---
-st.set_page_config(page_title="NovaJet 12-Label Pro", layout="wide")
-st.title("🏷️ Precision PDF Label Generator (NovaJet 12L)")
+# Sidebar Calibration
+st.sidebar.header("📏 Calibration Settings")
+st.sidebar.info("Adjust these if the print drifts from the stickers.")
 
-# Sidebar for Calibration
-st.sidebar.header("🔧 Sheet Calibration")
-st.sidebar.info("Adjust these if the print is slightly off on your specific printer.")
-
-# Based on your input: 10mm top, 44mm height, 3mm gap
 t_margin = st.sidebar.slider("Top Margin (mm)", 0.0, 20.0, 10.0)
 s_margin = st.sidebar.slider("Side Margin (mm)", 0.0, 20.0, 5.0)
 l_height = st.sidebar.slider("Label Height (mm)", 30.0, 50.0, 44.0)
@@ -47,36 +38,46 @@ from_addr = st.sidebar.text_area(
     "Presidency College Bangalore (AUTONOMOUS)\nKempapura, Hebbal, Bengaluru - 560024"
 )
 
-# File Uploads
+# File Upload Section
 col1, col2 = st.columns(2)
 with col1:
-    file_att = st.file_uploader("Upload Attendance Report", type=['xlsx', 'csv'])
-    skip = st.number_input("Data starts on row:", min_value=1, value=4)
+    file_att = st.file_uploader("Upload Attendance File", type=['xlsx', 'csv'])
+    skip_row_val = st.number_input("Data starts on row:", min_value=1, value=4)
 with col2:
     file_mast = st.file_uploader("Upload Master Database", type=['xlsx', 'csv'])
 
 if file_att and file_mast:
     try:
-        # Load and Match Data
-        df_c = pd.read_csv(file_att, skiprows=skip-1) if file_att.name.endswith('csv') else pd.read_excel(file_att, skiprows=skip-1)
-        df_m = pd.read_csv(file_mast) if file_mast.name.endswith('csv') else pd.read_excel(file_mast)
+        # Load Attendance
+        if file_att.name.endswith('csv'):
+            df_c = pd.read_csv(file_att, skiprows=skip_row_val-1)
+        else:
+            df_c = pd.read_excel(file_att, skiprows=skip_row_val-1)
+            
+        # Load Master
+        if file_mast.name.endswith('csv'):
+            df_m = pd.read_csv(file_mast)
+        else:
+            df_m = pd.read_excel(file_mast)
 
-        # Cleaning and Filtering
-        caution_rolls = df_c.iloc[:, 1].dropna().astype(str).str.replace('.0', '', regex=False).str.strip().unique()
+        # Match Data
+        caution_rolls = df_c.iloc[:, 1].dropna().astype(str).str.split('.').str[0].str.strip().unique()
         mast_data = df_m.iloc[:, [1, 5, 29, 18, 45, 44]].copy()
         mast_data.columns = ['Roll_No', 'Name', 'Father', 'Address', 'Father_Phone', 'Student_Phone']
-        mast_data['Roll_No'] = mast_data['Roll_No'].astype(str).str.replace('.0', '', regex=False).str.strip()
+        mast_data['Roll_No'] = mast_data['Roll_No'].astype(str).str.split('.').str[0].str.strip()
         
         df_matched = mast_data[mast_data['Roll_No'].isin(caution_rolls)].copy()
 
-        if st.button("🚀 Generate PDF Labels"):
+        if st.button("🚀 Generate PDF for Printing"):
             # Sorting
             df_matched['sort_rank'] = df_matched['Roll_No'].apply(get_sort_rank)
             df_matched = df_matched.sort_values(by=['sort_rank', 'Roll_No'])
             records = df_matched.to_dict('records')
 
-            pdf = LabelPDF()
-            pdf.set_font("Arial", size=8)
+            # PDF Generation
+            pdf = FPDF(orientation='P', unit='mm', format='A4')
+            pdf.set_auto_page_break(auto=False)
+            pdf.set_font("Helvetica", size=8)
 
             idx = 0
             while idx < len(records):
@@ -85,38 +86,37 @@ if file_att and file_mast:
                     for col in range(2): # 2 Labels across
                         if idx >= len(records): break
                         
-                        # Calculate XY coordinates
+                        # Calculate Position
                         x = s_margin + (col * l_width)
                         y = t_margin + (row * (l_height + v_gap))
                         
-                        # Add Label Content
+                        # Set Text Position
                         d = records[idx]
-                        f_ph = clean_val(d.get('Father_Phone'))
-                        s_ph = clean_val(d.get('Student_Phone'))
-                        contact = f"{f_ph} / {s_ph}".strip(" / ")
+                        contact = f"{clean_val(d.get('Father_Phone'))} / {clean_val(d.get('Student_Phone'))}".strip(" / ")
                         
-                        # Drawing invisible box for text containment
-                        pdf.set_xy(x + 3, y + 5) # Internal padding
-                        content = (
-                            f"From: {from_addr}\n\n"
+                        pdf.set_xy(x + 2, y + 4) # Small internal padding
+                        label_content = (
+                            f"From: {from_addr}\n"
                             f"To, Shri/Smt. {clean_val(d.get('Father'))}\n"
                             f"c/o: {clean_val(d.get('Name'))}\n"
                             f"Address: {clean_val(d.get('Address'))}\n"
-                            f"Contact: {contact}\n"
-                            f"ID: {clean_val(d.get('Roll_No'))}"
+                            f"Contact: {contact}   ID: {clean_val(d.get('Roll_No'))}"
                         )
-                        pdf.multi_cell(l_width - 6, 4, content, border=0, align='L')
+                        # Multi_cell handles text wrapping within the 100mm width
+                        pdf.multi_cell(l_width - 4, 4, label_content, border=0, align='L')
                         idx += 1
 
-            # Output
+            # --- THE BUFFER FIX ---
+            # Output to a bytes buffer to avoid 'Something went wrong' / encoding issues
             pdf_bytes = pdf.output()
-            st.success(f"Successfully generated {len(records)} labels!")
+            
+            st.success(f"Generated {len(records)} labels successfully.")
             st.download_button(
-                label="📥 Download PDF",
+                label="📥 Download Labels for Printer",
                 data=pdf_bytes,
-                file_name="Student_Labels_A4.pdf",
+                file_name="Student_Labels.pdf",
                 mime="application/pdf"
             )
 
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"Error details: {e}")
