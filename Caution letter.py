@@ -7,7 +7,7 @@ import io
 def clean_val(val):
     if pd.isna(val) or str(val).strip().lower() == 'nan': 
         return ""
-    # Remove .0 from numbers (common in Excel imports)
+    # Strip decimals (e.g., 123.0 -> 123)
     return str(val).split('.')[0].strip()
 
 def get_sort_rank(roll):
@@ -21,7 +21,7 @@ def get_sort_rank(roll):
 
 # --- 2. App Interface ---
 st.set_page_config(page_title="NovaJet Label Pro", layout="wide")
-st.title("🏷️ Student Label Generator (Final Corrected)")
+st.title("🏷️ Student Label Generator (Final Stability Version)")
 
 # Sidebar Settings
 st.sidebar.header("Calibration")
@@ -38,7 +38,6 @@ from_addr = st.sidebar.text_area(
 col1, col2 = st.columns(2)
 with col1:
     file_att = st.file_uploader("Upload Attendance Report", type=['xlsx', 'csv'])
-    # Syncing the variable name here to skip_row_val
     skip_row_val = st.number_input("Data starts on row:", min_value=1, value=4)
 
 with col2:
@@ -46,22 +45,16 @@ with col2:
 
 if file_att and file_mast:
     try:
-        # Load Files
-        if file_att.name.endswith('csv'):
-            df_c = pd.read_csv(file_att, skiprows=skip_row_val-1)
-        else:
-            df_c = pd.read_excel(file_att, skiprows=skip_row_val-1)
+        # Load Attendance
+        df_c = pd.read_csv(file_att, skiprows=skip_row_val-1) if file_att.name.endswith('csv') else pd.read_excel(file_att, skiprows=skip_row_val-1)
             
-        if file_master_data := file_mast: # Using assignment to avoid naming confusion
-            if file_master_data.name.endswith('csv'):
-                df_m = pd.read_csv(file_master_data)
-            else:
-                df_m = pd.read_excel(file_master_data)
+        # Load Master
+        df_m = pd.read_csv(file_mast) if file_mast.name.endswith('csv') else pd.read_excel(file_mast)
 
         # Match and Clean
         caution_rolls = df_c.iloc[:, 1].dropna().astype(str).str.split('.').str[0].str.strip().unique()
         
-        # Columns: B=1, F=5, AD=29, S=18, AT=45, AS=44
+        # Select Columns B, F, AD, S, AT, AS (indices 1, 5, 29, 18, 45, 44)
         mast_data = df_m.iloc[:, [1, 5, 29, 18, 45, 44]].copy()
         mast_data.columns = ['Roll_No', 'Name', 'Father', 'Address', 'Father_Phone', 'Student_Phone']
         mast_data['Roll_No'] = mast_data['Roll_No'].astype(str).str.split('.').str[0].str.strip()
@@ -83,8 +76,8 @@ if file_att and file_mast:
                 idx = 0
                 while idx < len(records):
                     pdf.add_page()
-                    for row in range(6): # 6 rows
-                        for col in range(2): # 2 cols
+                    for row in range(6): 
+                        for col in range(2): 
                             if idx >= len(records): break
                             
                             # Position (100x44 labels)
@@ -104,18 +97,24 @@ if file_att and file_mast:
                                 f"Address: {clean_val(d.get('Address'))}\n"
                                 f"Contact: {contact}   ID: {clean_val(d.get('Roll_No'))}"
                             )
-                            pdf.multi_cell(94, 4, content, border=0)
+                            # 94mm width for text (padding 100mm label)
+                            pdf.multi_cell(94, 4.5, content, border=0)
                             idx += 1
 
-                # Final Output handling
+                # --- NEW STABLE OUTPUT METHOD ---
+                # We fetch the output and ensure it is treated as raw binary bytes
                 pdf_output = pdf.output()
                 
-                # Check if it's already bytes or needs conversion
-                final_pdf = bytes(pdf_output) if isinstance(pdf_output, (bytearray, str)) else pdf_output
+                # If output() returned a string (rare now), encode it. 
+                # If it's a bytearray, bytes() converts it safely.
+                if isinstance(pdf_output, str):
+                    final_pdf = pdf_output.encode('latin-1')
+                else:
+                    final_pdf = bytes(pdf_output)
 
                 st.success(f"Generated {len(records)} labels successfully.")
                 st.download_button(
-                    label="📥 Download PDF",
+                    label="📥 Download PDF for Adobe",
                     data=final_pdf,
                     file_name="Student_Labels.pdf",
                     mime="application/pdf"
