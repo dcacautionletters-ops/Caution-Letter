@@ -7,7 +7,7 @@ import io
 def clean_val(val):
     if pd.isna(val) or str(val).strip().lower() == 'nan': 
         return ""
-    # Strip decimals (e.g., 123.0 -> 123)
+    # Strip decimals like 123.0 -> 123
     return str(val).split('.')[0].strip()
 
 def get_sort_rank(roll):
@@ -19,9 +19,9 @@ def get_sort_rank(roll):
     if roll.startswith('23C'): return 5
     return 6
 
-# --- 2. App Interface ---
+# --- 2. Interface ---
 st.set_page_config(page_title="NovaJet Label Pro", layout="wide")
-st.title("🏷️ Student Label Generator (Final Stability Version)")
+st.title("🏷️ Precision Label Generator (Final Stabilized)")
 
 # Sidebar Settings
 st.sidebar.header("Calibration")
@@ -54,7 +54,7 @@ if file_att and file_mast:
         # Match and Clean
         caution_rolls = df_c.iloc[:, 1].dropna().astype(str).str.split('.').str[0].str.strip().unique()
         
-        # Select Columns B, F, AD, S, AT, AS (indices 1, 5, 29, 18, 45, 44)
+        # Select Columns: Roll(B), Name(F), Father(AD), Address(S), FatherPh(AT), StudentPh(AS)
         mast_data = df_m.iloc[:, [1, 5, 29, 18, 45, 44]].copy()
         mast_data.columns = ['Roll_No', 'Name', 'Father', 'Address', 'Father_Phone', 'Student_Phone']
         mast_data['Roll_No'] = mast_data['Roll_No'].astype(str).str.split('.').str[0].str.strip()
@@ -68,7 +68,7 @@ if file_att and file_mast:
                 df_matched = df_matched.sort_values(by=['sort_rank', 'Roll_No'])
                 records = df_matched.to_dict('records')
 
-                # Create PDF
+                # Create PDF in memory
                 pdf = FPDF(orientation='P', unit='mm', format='A4')
                 pdf.set_auto_page_break(auto=False)
                 pdf.set_font("Helvetica", size=9)
@@ -85,9 +85,7 @@ if file_att and file_mast:
                             y = t_margin + (row * (44 + v_gap))
                             
                             d = records[idx]
-                            f_ph = clean_val(d.get('Father_Phone'))
-                            s_ph = clean_val(d.get('Student_Phone'))
-                            contact = f"{f_ph} / {s_ph}".strip(" / ")
+                            contact = f"{clean_val(d.get('Father_Phone'))} / {clean_val(d.get('Student_Phone'))}".strip(" / ")
                             
                             pdf.set_xy(x + 3, y + 5)
                             content = (
@@ -97,30 +95,29 @@ if file_att and file_mast:
                                 f"Address: {clean_val(d.get('Address'))}\n"
                                 f"Contact: {contact}   ID: {clean_val(d.get('Roll_No'))}"
                             )
-                            # 94mm width for text (padding 100mm label)
                             pdf.multi_cell(94, 4.5, content, border=0)
                             idx += 1
 
-                # --- NEW STABLE OUTPUT METHOD ---
-                # We fetch the output and ensure it is treated as raw binary bytes
+                # --- THE BUFFER METHOD ---
+                # We write the PDF to a string, then convert to bytes
+                # This ensures Adobe sees a perfectly clean binary header
                 pdf_output = pdf.output()
                 
-                # If output() returned a string (rare now), encode it. 
-                # If it's a bytearray, bytes() converts it safely.
+                # Using a manual byte conversion to ensure total Adobe compatibility
                 if isinstance(pdf_output, str):
-                    final_pdf = pdf_output.encode('latin-1')
+                    final_pdf_bytes = pdf_output.encode('latin-1')
                 else:
-                    final_pdf = bytes(pdf_output)
+                    final_pdf_bytes = bytes(pdf_output)
 
-                st.success(f"Generated {len(records)} labels successfully.")
+                st.success(f"Generated {len(records)} labels.")
                 st.download_button(
-                    label="📥 Download PDF for Adobe",
-                    data=final_pdf,
-                    file_name="Student_Labels.pdf",
+                    label="📥 Download & Open in Adobe",
+                    data=final_pdf_bytes,
+                    file_name="Labels_For_Adobe.pdf",
                     mime="application/pdf"
                 )
             else:
-                st.warning("No matches found between the two files.")
+                st.warning("No matches found between the files.")
 
     except Exception as e:
         st.error(f"An error occurred: {e}")
