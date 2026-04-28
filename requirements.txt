@@ -4,4 +4,4 @@ openpyxl
 xlsxwriter
 fpdf
 plotly
-
+reportlab
