@@ -98,16 +98,11 @@ if file_att and file_mast:
                             pdf.multi_cell(94, 4.5, content, border=0)
                             idx += 1
 
-                # --- THE BUFFER METHOD ---
-                # We write the PDF to a string, then convert to bytes
-                # This ensures Adobe sees a perfectly clean binary header
-                pdf_output = pdf.output()
-                
-                # Using a manual byte conversion to ensure total Adobe compatibility
-                if isinstance(pdf_output, str):
-                    final_pdf_bytes = pdf_output.encode('latin-1')
-                else:
-                    final_pdf_bytes = bytes(pdf_output)
+                # --- FIXED BUFFER METHOD ---
+                # Write PDF to a BytesIO buffer directly — most reliable cross-platform approach
+                buffer = io.BytesIO()
+                pdf.output(buffer)
+                final_pdf_bytes = buffer.getvalue()
 
                 st.success(f"Generated {len(records)} labels.")
                 st.download_button(
