@@ -99,10 +99,10 @@ if file_att and file_mast:
                             idx += 1
 
                 # --- FIXED BUFFER METHOD ---
-                # Write PDF to a BytesIO buffer directly — most reliable cross-platform approach
-                buffer = io.BytesIO()
-                pdf.output(buffer)
-                final_pdf_bytes = buffer.getvalue()
+                # pdf.output() with no args returns a bytearray in fpdf2
+                # Convert via latin-1 is wrong; bytearray -> bytes directly is correct
+                raw = pdf.output()
+                final_pdf_bytes = bytes(raw) if isinstance(raw, bytearray) else raw.encode('latin-1')
 
                 st.success(f"Generated {len(records)} labels.")
                 st.download_button(
